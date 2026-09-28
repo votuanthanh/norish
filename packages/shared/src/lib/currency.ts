@@ -38,6 +38,7 @@ const TLD_CURRENCIES: Record<string, string> = {
   nz: "NZD",
   br: "BRL",
   us: "USD",
+  vn: "VND",
 };
 
 export function currencyForUrl(pageUrl: string | null | undefined): string | null {

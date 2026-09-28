@@ -114,6 +114,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   "₩": "KRW",
   zł: "PLN",
   kr: "SEK",
+  "₫": "VND",
 };
 const CURRENCY_CODES = new Set([
   "EUR",
@@ -135,6 +136,7 @@ const CURRENCY_CODES = new Set([
   "AUD",
   "NZD",
   "BRL",
+  "VND",
 ]);
 
 function currencyCode(value: unknown): string | null {
@@ -156,6 +158,18 @@ const CURRENCY_MARK = "€|£|\\$|₽|₩|zł|kr\\.?(?![a-z])";
 const AMOUNT = "\\d{1,6}(?:[.,]\\d{3})*(?:[.,]\\d{2}|[.,]-)";
 const MONEY_BEFORE = new RegExp(`(${CURRENCY_MARK}|\\b[A-Z]{3}\\b)\\s?(${AMOUNT})(?!\\d)`, "g");
 const MONEY_AFTER = new RegExp(`(?<![\\d.,])(${AMOUNT})\\s?(${CURRENCY_MARK}|\\b[A-Z]{3}\\b)`, "g");
+/**
+ * A price in đồng, which has no cents: `11.400₫`, `11.400 đ`, `125,000 VND`.
+ * {@link AMOUNT} insists on cents, and read that way `11.400` is eleven and a
+ * bit, so a whole amount grouped by thousands is read only beside a mark that
+ * says the currency has nothing smaller. `đ` is also a letter, so it counts as
+ * a mark only where no letter follows it.
+ */
+const WHOLE_AMOUNT = "\\d{1,3}(?:[.,]\\d{3})+|\\d{1,9}";
+const WHOLE_MARK_AFTER = "₫|đồng|đ(?!\\p{L})|VND\\b";
+const WHOLE_BEFORE = new RegExp(`(?:₫|\\bVND)\\s?(${WHOLE_AMOUNT})(?![\\d.,])`, "gu");
+const WHOLE_AFTER = new RegExp(`(?<![\\d.,])(${WHOLE_AMOUNT})\\s?(?:${WHOLE_MARK_AFTER})`, "giu");
+const WHOLE_CURRENCY = "VND";
 /**
  * A price per weight or volume rather than per pack: `€ 19,93 / kg`, `€ 1,99
  * per 100 g`. Beside a pack price it is the comparison number Norish does not
@@ -226,6 +240,20 @@ export function readPricesInText(value: string, near?: string | null): PriceInTe
     const perUnit = perUnitAfter(value, match.index + match[0].length);
 
     found.push({ at: match.index, reading: { price, currency, ...(perUnit ? { perUnit } : {}) } });
+  }
+  for (const match of [...value.matchAll(WHOLE_BEFORE), ...value.matchAll(WHOLE_AFTER)]) {
+    const price = Number((match[1] ?? "").replace(/[.,]/g, ""));
+
+    if (!Number.isFinite(price) || [...claimed].some((at) => Math.abs(at - match.index) < 4)) {
+      continue;
+    }
+    const perUnit = perUnitAfter(value, match.index + match[0].length);
+
+    claimed.add(match.index);
+    found.push({
+      at: match.index,
+      reading: { price, currency: WHOLE_CURRENCY, ...(perUnit ? { perUnit } : {}) },
+    });
   }
 
   return found.sort((a, b) => a.at - b.at).map((entry) => entry.reading);

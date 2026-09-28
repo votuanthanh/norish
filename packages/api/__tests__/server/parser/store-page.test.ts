@@ -415,6 +415,7 @@ describe("prices as Europe writes them", () => {
   it("falls back to what the website's top-level domain implies", () => {
     expect(currencyForUrl("https://www.dirk.nl/zoeken")).toBe("EUR");
     expect(currencyForUrl("https://shop.example.pl/szukaj")).toBe("PLN");
+    expect(currencyForUrl("https://winmart.vn/search")).toBe("VND");
   });
 });
 
@@ -523,6 +524,30 @@ describe("what a card says, read the way a shopper reads it", () => {
 
   it("reads a whole-euro price written with a dash for its cents", () => {
     expect(readPriceInText("€ 2,-")).toEqual({ price: 2, currency: "EUR" });
+  });
+
+  it("reads đồng as whole amounts grouped by thousands, whatever mark the shop writes", () => {
+    expect(readPriceInText("11.400₫")).toEqual({ price: 11400, currency: "VND" });
+    expect(readPriceInText("11.400 đ")).toEqual({ price: 11400, currency: "VND" });
+    expect(readPriceInText("1.125.000đ")).toEqual({ price: 1125000, currency: "VND" });
+    expect(readPriceInText("125,000 VND")).toEqual({ price: 125000, currency: "VND" });
+    expect(readPriceInText("₫ 9.900")).toEqual({ price: 9900, currency: "VND" });
+    expect(readPriceInText("25.000 đồng")).toEqual({ price: 25000, currency: "VND" });
+  });
+
+  it("never reads a Vietnamese word that starts with đ as a price", () => {
+    expect(readPriceInText("Cháo tổ yến 50 đường")).toBeNull();
+  });
+
+  it("prices a Vietnamese shop's cards in đồng, beside their pack size", () => {
+    const html = shelf(
+      `<article><a href="/products/chao-N">Cháo tổ yến N</a><span>50g</span><span>11.400 ₫</span></article>`
+    );
+
+    expect(first(html, "https://winmart.vn/search/chao+tao+yen")).toMatchObject({
+      price: 11400,
+      currency: "VND",
+    });
   });
 
   it("names a card wrapped in one link by its heading, not by everything in it", () => {
