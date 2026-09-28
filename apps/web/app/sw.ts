@@ -24,6 +24,9 @@ declare global {
 
 declare const self: ServiceWorkerGlobalScope;
 
+/** The shop search's own path, which the `/api/` ceiling does not govern. */
+const SHOP_SEARCH_PATH = "/api/trpc/stores.searchShop";
+
 // Parity with the ExpirationPlugin cap the defaultCache page strategy carried;
 // the hand-rolled put below must bound the cache itself.
 const DOCUMENT_CACHE_LIMIT = 32;
@@ -167,6 +170,15 @@ const serwist = new Serwist({
     // never cached by anything). The 10s ceiling is `defaultCache`'s, kept so
     // its `/api/auth/*` rule — which this one now shadows — behaves as before;
     // the health probe bounds itself at 5s and never reaches it.
+    //
+    // A shop search is the exception: it waits on the shop and, for a shop
+    // that draws its shelf in the browser, on a rendered page, which takes
+    // longer than 10s. The client sends it unbatched (`UNBATCHED_QUERIES`),
+    // so it arrives on its own path and nothing else is let past the ceiling.
+    {
+      matcher: ({ url, sameOrigin }) => sameOrigin && url.pathname === SHOP_SEARCH_PATH,
+      handler: new NetworkOnly(),
+    },
     {
       matcher: ({ url, sameOrigin }) => sameOrigin && url.pathname.startsWith("/api/"),
       handler: new NetworkOnly({ networkTimeoutSeconds: 10 }),

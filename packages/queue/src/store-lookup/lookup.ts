@@ -129,10 +129,27 @@ export async function searchStore(
   // Read against the address the shop answered from: a shop that redirects to
   // its `www.` writes its links for that host, and against the asked-for one
   // most of its shelf would resolve elsewhere and go unpriced.
-  return {
-    candidates: pricedCandidates(readSearchResults(visit.html, visit.url ?? url)),
-    answered: true,
-  };
+  const read = readSearchResults(visit.html, visit.url ?? url);
+  const candidates = pricedCandidates(read);
+
+  // A shop that answered with nothing priced is the one case a shopper cannot
+  // tell apart from the outside: an empty shelf, a page never rendered, or
+  // prices the reader cannot read. What the page was says which.
+  if (candidates.length === 0) {
+    log.info(
+      {
+        url,
+        answeredFrom: visit.url,
+        rendered: visit.rendered,
+        htmlBytes: visit.html.length,
+        title: /<title>([^<]*)<\/title>/i.exec(visit.html)?.[1]?.trim() ?? null,
+        unpriced: read.length,
+      },
+      "The shop answered a search with nothing priced"
+    );
+  }
+
+  return { candidates, answered: true };
 }
 
 /**

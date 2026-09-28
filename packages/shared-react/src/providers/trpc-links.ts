@@ -162,12 +162,21 @@ function createUnauthorizedLink<TRouter extends AnyTRPCRouter>(
 }
 
 /**
+ * Queries that can outlast every other query on a screen, sent on their own
+ * rather than in a batch. A batch answers when its slowest member does, so a
+ * shop search that waits on a rendered page would hold the store's product
+ * list with it, and fail it too when the search is given up. The service
+ * worker lets these same paths past its 10-second ceiling on `/api/`.
+ */
+export const UNBATCHED_QUERIES: ReadonlySet<string> = new Set(["stores.searchShop"]);
+
+/**
  * The HTTP links are built against `AnyTRPCRouter`: tRPC types the transformer
  * option on the router's client types, and for a generic router that
  * conditional never resolves. A link over `AnyTRPCRouter` is a `TRPCLink` of
  * the concrete router too, so `createTRPCClientLinks` returns them typed.
  */
-function createHttpMutationLink(
+function createHttpUnbatchedLink(
   getBaseUrl: () => string,
   getHeaders: () => HTTPHeaders
 ): TRPCLink<AnyTRPCRouter> {
@@ -201,12 +210,16 @@ function createHttpTransportLink(
     true: splitLink({
       condition: (op) => isNonJsonSerializable(op.input),
       true: createHttpFormDataMutationLink(getBaseUrl, getHeaders),
-      false: createHttpMutationLink(getBaseUrl, getHeaders),
+      false: createHttpUnbatchedLink(getBaseUrl, getHeaders),
     }),
-    false: httpBatchLink({
-      url: `${getBaseUrl()}/api/trpc`,
-      headers: createBatchRequestHeadersResolver(getHeaders),
-      transformer: superjson,
+    false: splitLink({
+      condition: (op) => UNBATCHED_QUERIES.has(op.path),
+      true: createHttpUnbatchedLink(getBaseUrl, getHeaders),
+      false: httpBatchLink({
+        url: `${getBaseUrl()}/api/trpc`,
+        headers: createBatchRequestHeadersResolver(getHeaders),
+        transformer: superjson,
+      }),
     }),
   });
 }
