@@ -18,7 +18,14 @@ vi.mock("@norish/config/env-config-server", () => ({
 }));
 
 vi.mock("node:dns/promises", () => ({
-  lookup: vi.fn(async () => ({ address: "fd12:3456::7", family: 6 })),
+  lookup: vi.fn(async (hostname: string) =>
+    hostname === "dual.railway.internal"
+      ? [
+          { address: "fd12:3456::7", family: 6 },
+          { address: "10.250.0.7", family: 4 },
+        ]
+      : [{ address: "fd12:3456::7", family: 6 }]
+  ),
 }));
 
 vi.mock("@norish/shared-server/logger", () => ({
@@ -181,5 +188,9 @@ describe("dialledEndpoint – how Chromium is reached", () => {
     await expect(
       dialledEndpoint("http://chromium.railway.internal:9222", "chromium")
     ).resolves.toBe("http://[fd12:3456::7]:9222");
+    // IPv4 first: the image listens on IPv4 only.
+    await expect(dialledEndpoint("http://dual.railway.internal:9222", "chromium")).resolves.toBe(
+      "http://10.250.0.7:9222"
+    );
   });
 });

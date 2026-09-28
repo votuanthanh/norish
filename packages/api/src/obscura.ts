@@ -36,9 +36,13 @@ export async function dialledEndpoint(
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
 
   if (hostname === "localhost" || isIP(hostname)) return endpoint;
-  const { address, family } = await lookup(hostname);
+  // IPv4 first: chromedp/headless-shell listens on IPv4 only, and a private
+  // network such as Railway's may list a service's IPv6 address first.
+  const addresses = await lookup(hostname, { all: true });
+  const chosen = addresses.find((entry) => entry.family === 4) ?? addresses[0];
 
-  url.hostname = family === 6 ? `[${address}]` : address;
+  if (!chosen) throw new Error(`${hostname} did not resolve`);
+  url.hostname = chosen.family === 6 ? `[${chosen.address}]` : chosen.address;
 
   return url.toString().replace(/\/$/, "");
 }

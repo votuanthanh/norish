@@ -33,9 +33,11 @@ OBSCURA_ENDPOINT=http://localhost:9223
 
 ## Railway
 
-1. Create a new service from this repository.
-2. In the service settings, set **Config file path** to
-   `docker/chromium/railway.json`.
+1. In the project, click **+ Create**, then **Docker Image**, and enter
+   `chromedp/headless-shell:151.0.7922.109`. (Or create the service from this
+   repository and set its **Config file path** to
+   `docker/chromium/railway.json`; the image is the same.)
+2. Rename the service to `chromium`.
 3. Do not generate a public domain for it. Anyone who reaches the DevTools
    port can drive the browser.
 4. On the Norish service, set:
@@ -45,6 +47,7 @@ OBSCURA_ENDPOINT=http://localhost:9223
    OBSCURA_ENDPOINT=http://${{chromium.RAILWAY_PRIVATE_DOMAIN}}:9222
    ```
 
-   Replace `chromium` with the name you gave the service.
+5. Deploy both services. You can then remove the Obscura service.
 
-5. Redeploy Norish. You can then remove the Obscura service.
+The image listens on IPv4 only, so Norish prefers the IPv4 address of the
+service name when it connects.
