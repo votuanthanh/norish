@@ -3,7 +3,7 @@
   "extends": ["//"],
   "tasks": {
     "test": {
-      "env": ["DATABASE_URL", "MASTER_KEY", "AUTH_URL", "OBSCURA_ENDPOINT"]
+      "env": ["DATABASE_URL", "MASTER_KEY", "AUTH_URL", "OBSCURA_ENDPOINT", "RENDER_ENGINE"]
     }
   }
 }

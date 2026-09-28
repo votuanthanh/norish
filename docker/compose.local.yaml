@@ -15,3 +15,16 @@ services:
     container_name: norish-redis-local
     ports:
       - "6379:6379"
+
+  # A real headless Chromium for shops whose apps Obscura cannot run. Used only
+  # when `RENDER_ENGINE=chromium` and `OBSCURA_ENDPOINT=http://localhost:9223`;
+  # Norish then guards every request against private addresses itself, since
+  # Chromium has no such protection of its own.
+  chromium:
+    image: chromedp/headless-shell:151.0.7922.109
+    container_name: norish-chromium-local
+    restart: unless-stopped
+    shm_size: 512m
+    ports:
+      # Loopback only, like Obscura: anyone who reaches it can drive the browser.
+      - "127.0.0.1:9223:9222"

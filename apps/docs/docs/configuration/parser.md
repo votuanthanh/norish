@@ -33,10 +33,11 @@ network.
 
 ## Settings
 
-| Variable                | Description                               | Default             |
-| ----------------------- | ----------------------------------------- | ------------------- |
-| `OBSCURA_ENDPOINT`      | Obscura CDP endpoint used to render pages | `ws://obscura:9222` |
-| `PARSER_API_TIMEOUT_MS` | Parser API timeout in milliseconds        | `15000`             |
+| Variable                | Description                                          | Default             |
+| ----------------------- | ---------------------------------------------------- | ------------------- |
+| `OBSCURA_ENDPOINT`      | CDP endpoint of the browser used to render pages     | `ws://obscura:9222` |
+| `RENDER_ENGINE`         | Which browser answers there: `obscura` or `chromium` | `obscura`           |
+| `PARSER_API_TIMEOUT_MS` | Parser API timeout in milliseconds                   | `15000`             |
 
 The default addresses the `obscura` service shipped in the Quick start compose.
 Point `OBSCURA_ENDPOINT` at any reachable Obscura CDP server if you would rather
@@ -46,6 +47,29 @@ that can reach it can drive the browser.
 
 Norish starts fine without a reachable Obscura; URL imports are what fail, and
 they say so.
+
+### Chromium instead of Obscura
+
+Some shops run storefront apps that Obscura cannot execute, so a store search
+there finds nothing. For those, set `RENDER_ENGINE=chromium` and point
+`OBSCURA_ENDPOINT` at a headless Chromium such as
+[`chromedp/headless-shell`](https://github.com/chromedp/docker-headless-shell),
+for example `http://chromium:9222`.
+
+Chromium has none of Obscura's protections, so know what you trade:
+
+- Chromium does not refuse private addresses. Norish checks every request a
+  rendered page makes and aborts any whose host resolves to a loopback,
+  private-network or link-local address. The check resolves the name before
+  Chromium does, so a host that answers differently the second time is not
+  covered.
+- Chromium has no stealth features, so sites that screen automated traffic
+  refuse it more often.
+- Chromium uses several hundred megabytes more memory.
+
+Chromium's DevTools server answers only an IP address or `localhost`, so Norish
+resolves a service name in `OBSCURA_ENDPOINT` to its address before it
+connects.
 
 ## Content detection
 

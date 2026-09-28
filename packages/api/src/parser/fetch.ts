@@ -2,7 +2,10 @@ import type { BrowserContext, Page } from "playwright-core";
 
 import type { SiteAuthTokenDecryptedDto } from "@norish/shared/contracts/dto/site-auth-tokens";
 import { getBrowser } from "@norish/api/obscura";
+import { SERVER_CONFIG } from "@norish/config/env-config-server";
 import { parserLogger as log } from "@norish/shared-server/logger";
+
+import { guardPrivateNetwork } from "./private-network";
 
 /**
  * The whole navigation budget. One deadline rather than a stack of them: the
@@ -46,6 +49,27 @@ async function settledContent(page: Page, isSettled: (html: string) => boolean):
   }
 
   return html ?? "";
+}
+
+/**
+ * Obscura defines `window.__NEXT_DATA__` with a getter and no setter. A
+ * Next.js app assigns that property as it boots, so the assignment throws,
+ * the app never hydrates, and a shop that draws its shelf in the browser
+ * (WinMart) renders its empty shell for ever. Declaring it a plain writable
+ * property before any page script runs gives the app back what it expects; a
+ * page that never assigns it is unaffected. Runs in the page, so it names
+ * `globalThis` rather than `window`.
+ */
+function restoreNextData(): void {
+  try {
+    Object.defineProperty(globalThis, "__NEXT_DATA__", {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+  } catch {
+    // The page keeps whatever Obscura gave it.
+  }
 }
 
 /** A rendered page and the HTTP status its document last arrived with. */
@@ -127,6 +151,10 @@ export async function renderPage(
         }))
       );
     }
+
+    await context.addInitScript(restoreNextData);
+    // Obscura refuses private addresses itself; Chromium needs Norish to.
+    if (SERVER_CONFIG.RENDER_ENGINE === "chromium") await guardPrivateNetwork(context);
 
     const page = await context.newPage();
 

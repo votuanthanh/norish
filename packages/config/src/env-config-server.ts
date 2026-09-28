@@ -210,6 +210,13 @@ const ServerConfigSchema = z.object({
     .min(1, "OBSCURA_ENDPOINT is required for web scraping")
     .default("ws://obscura:9222"),
 
+  // Which browser answers at OBSCURA_ENDPOINT. `chromium` is a real headless
+  // Chromium (chromedp/headless-shell) for shops whose apps Obscura cannot
+  // run. Chromium has none of Obscura's private-network protection, so Norish
+  // guards every request a Chromium render makes, and dials it by IP address
+  // because its DevTools server refuses any other Host header.
+  RENDER_ENGINE: z.enum(["obscura", "chromium"]).default("obscura"),
+
   PARSER_API_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 
   // Scheduler Configuration

@@ -19,19 +19,43 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SiteAuthTokenDecryptedDto } from "@norish/shared/contracts/dto/site-auth-tokens";
 import { fetchRenderedPage, renderPage } from "@norish/api/parser/fetch";
 
-const { mockGetBrowser, mockNewContext, mockNewPage, mockGoto, mockContent, mockClose } =
-  vi.hoisted(() => {
-    const mockGoto = vi.fn();
-    const mockContent = vi.fn();
-    const mockClose = vi.fn();
-    const mockNewPage = vi.fn();
-    const mockNewContext = vi.fn();
-    const mockGetBrowser = vi.fn();
+const {
+  mockGetBrowser,
+  mockNewContext,
+  mockNewPage,
+  mockGoto,
+  mockContent,
+  mockClose,
+  mockAddInitScript,
+  mockRoute,
+} = vi.hoisted(() => {
+  const mockGoto = vi.fn();
+  const mockContent = vi.fn();
+  const mockClose = vi.fn();
+  const mockNewPage = vi.fn();
+  const mockNewContext = vi.fn();
+  const mockGetBrowser = vi.fn();
+  const mockAddInitScript = vi.fn();
+  const mockRoute = vi.fn();
 
-    return { mockGetBrowser, mockNewContext, mockNewPage, mockGoto, mockContent, mockClose };
-  });
+  return {
+    mockGetBrowser,
+    mockNewContext,
+    mockNewPage,
+    mockGoto,
+    mockContent,
+    mockClose,
+    mockAddInitScript,
+    mockRoute,
+  };
+});
 
 vi.mock("@norish/api/obscura", () => ({ getBrowser: mockGetBrowser }));
+
+// Obscura unless a test says otherwise, whatever the developer's own env holds.
+const serverConfig = vi.hoisted(() => ({ RENDER_ENGINE: "obscura" as "obscura" | "chromium" }));
+
+vi.mock("@norish/config/env-config-server", () => ({ SERVER_CONFIG: serverConfig }));
 
 vi.mock("@norish/shared-server/logger", () => ({
   parserLogger: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -91,8 +115,11 @@ beforeEach(() => {
       responseListeners.push(listener);
     },
   });
+  serverConfig.RENDER_ENGINE = "obscura";
   mockNewContext.mockImplementation(async () => ({
     addCookies: vi.fn(),
+    addInitScript: mockAddInitScript,
+    route: mockRoute,
     newPage: mockNewPage,
     close: mockClose,
   }));
@@ -132,6 +159,43 @@ describe("fetchRenderedPage – rendered-page contract", () => {
     // is that Norish configures nothing here at all, so a header added back
     // later fails this rather than slipping past a fixed deny-list.
     expect(contextOptions()).toEqual({});
+  });
+
+  it("lets a Next.js page assign __NEXT_DATA__, which Obscura leaves getter-only", async () => {
+    await fetchRenderedPage("https://winmart.vn/search/chao");
+
+    expect(mockAddInitScript).toHaveBeenCalledOnce();
+
+    // Run the script against a window shaped the way Obscura shapes it.
+    const script = mockAddInitScript.mock.calls[0]?.[0] as () => void;
+    const page = globalThis as { __NEXT_DATA__?: unknown };
+
+    Object.defineProperty(globalThis, "__NEXT_DATA__", {
+      get: () => undefined,
+      configurable: true,
+    });
+    try {
+      script();
+      page.__NEXT_DATA__ = { page: "/search/[slug]" };
+
+      expect(page.__NEXT_DATA__).toEqual({ page: "/search/[slug]" });
+    } finally {
+      delete page.__NEXT_DATA__;
+    }
+  });
+
+  it("leaves Obscura's requests alone, since Obscura refuses private addresses itself", async () => {
+    await fetchRenderedPage("https://example.com/recipe");
+
+    expect(mockRoute).not.toHaveBeenCalled();
+  });
+
+  it("guards every request a Chromium render makes", async () => {
+    serverConfig.RENDER_ENGINE = "chromium";
+
+    await fetchRenderedPage("https://example.com/recipe");
+
+    expect(mockRoute).toHaveBeenCalledExactlyOnceWith("**/*", expect.any(Function));
   });
 
   it("adds no referer, client hints or fetch metadata alongside a user's headers", async () => {

@@ -17,6 +17,10 @@ vi.mock("@norish/config/env-config-server", () => ({
   SERVER_CONFIG: { OBSCURA_ENDPOINT: "ws://obscura.test:9222" },
 }));
 
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => ({ address: "fd12:3456::7", family: 6 })),
+}));
+
 vi.mock("@norish/shared-server/logger", () => ({
   serverLogger: { debug: vi.fn(), warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
@@ -153,5 +157,29 @@ describe("closeBrowser – process shutdown", () => {
 
     await getBrowser();
     await expect(closeBrowser()).resolves.toBeUndefined();
+  });
+});
+
+describe("dialledEndpoint – how Chromium is reached", () => {
+  it("dials Obscura exactly as configured", async () => {
+    const { dialledEndpoint } = await loadModule();
+
+    await expect(dialledEndpoint("ws://obscura.test:9222", "obscura")).resolves.toBe(
+      "ws://obscura.test:9222"
+    );
+  });
+
+  it("dials Chromium by address, since its DevTools server refuses a service name", async () => {
+    const { dialledEndpoint } = await loadModule();
+
+    await expect(dialledEndpoint("http://localhost:9223", "chromium")).resolves.toBe(
+      "http://localhost:9223"
+    );
+    await expect(dialledEndpoint("http://127.0.0.1:9222", "chromium")).resolves.toBe(
+      "http://127.0.0.1:9222"
+    );
+    await expect(
+      dialledEndpoint("http://chromium.railway.internal:9222", "chromium")
+    ).resolves.toBe("http://[fd12:3456::7]:9222");
   });
 });

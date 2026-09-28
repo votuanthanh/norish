@@ -1,3 +1,5 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { Browser } from "playwright-core";
 import { chromium } from "playwright-core";
 
@@ -9,6 +11,11 @@ import { serverLogger as log } from "@norish/shared-server/logger";
  * imports. Obscura serves the Chrome DevTools Protocol, so Playwright Core
  * talks to it directly: `OBSCURA_ENDPOINT` is dialled as given, with no
  * debugger-metadata probe and no hostname rewriting in between.
+ *
+ * Chromium (`RENDER_ENGINE=chromium`) is the one exception. Its DevTools
+ * server answers only a Host header that is an IP address or `localhost`, so
+ * a service name such as `chromium.railway.internal` is resolved first and
+ * the endpoint dialled by the address it resolves to.
  */
 let browser: Browser | null = null;
 
@@ -19,6 +26,23 @@ let browser: Browser | null = null;
  */
 let connecting: Promise<Browser> | null = null;
 
+/** The endpoint to dial: as configured, or for Chromium, by IP address. */
+export async function dialledEndpoint(
+  endpoint: string,
+  engine: "obscura" | "chromium"
+): Promise<string> {
+  if (engine !== "chromium") return endpoint;
+  const url = new URL(endpoint);
+  const hostname = url.hostname.replace(/^\[|\]$/g, "");
+
+  if (hostname === "localhost" || isIP(hostname)) return endpoint;
+  const { address, family } = await lookup(hostname);
+
+  url.hostname = family === 6 ? `[${address}]` : address;
+
+  return url.toString().replace(/\/$/, "");
+}
+
 export async function getBrowser(): Promise<Browser> {
   // One connection serves every import; contexts, not connections, are what
   // keeps concurrent imports isolated. A connection Obscura dropped — because
@@ -28,8 +52,13 @@ export async function getBrowser(): Promise<Browser> {
 
   const endpoint = SERVER_CONFIG.OBSCURA_ENDPOINT;
 
-  connecting = chromium
-    .connectOverCDP(endpoint)
+  const engine = SERVER_CONFIG.RENDER_ENGINE ?? "obscura";
+  const connection =
+    engine === "chromium"
+      ? dialledEndpoint(endpoint, engine).then((dialled) => chromium.connectOverCDP(dialled))
+      : chromium.connectOverCDP(endpoint);
+
+  connecting = connection
     .then((connected) => {
       browser = connected;
 

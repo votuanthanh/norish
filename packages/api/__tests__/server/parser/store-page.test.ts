@@ -535,6 +535,79 @@ describe("what a card says, read the way a shopper reads it", () => {
     expect(readPriceInText("25.000 đồng")).toEqual({ price: 25000, currency: "VND" });
   });
 
+  it("reads a đồng price whose every group sits in its own element", () => {
+    // MM Mega Market: the price now, the struck price, and a deal's words.
+    const html = shelf(
+      `<article><a href="/product/bia-N.html">Bia N, lốc 6 lon</a>` +
+        `<div class="finalPrice"><span>385</span><span>,</span><span>000</span><span>&nbsp;</span><span>₫</span> / Lốc</div>` +
+        `<div class="oldPrice"><span>421</span><span>,</span><span>000</span><span>&nbsp;</span><span>₫</span></div>` +
+        `<span>Mua từ 3 giảm 2.01%</span></article>`
+    );
+
+    expect(first(html, "https://online.mmvietnam.com/search.html?query=bia")).toMatchObject({
+      price: 385000,
+      currency: "VND",
+      regularPrice: 421000,
+    });
+  });
+
+  it("grows a card past a button every card carries to a page of another shape", () => {
+    // A signed-out shopper's wishlist heart leads to the sign-in page from every card.
+    const html = shelf(
+      `<div class="item"><a href="/product/bia-N.html"><img alt="Bia N"></a>` +
+        `<a href="/sign-in?referer=search">♡</a>` +
+        `<div><span>498</span><span>,</span><span>000</span><span>&nbsp;</span><span>₫</span></div>` +
+        `<h3><a href="/product/bia-N.html">Bia N</a></h3></div>`
+    );
+
+    expect(first(html, "https://online.mmvietnam.com/search.html?query=bia")).toMatchObject({
+      name: "Bia 1",
+      price: 498000,
+      currency: "VND",
+    });
+  });
+
+  it("names a product by its picture, not by a stylesheet inside its link", () => {
+    // MM Mega Market styles a product's label with a <style> in the image link.
+    const html = shelf(
+      `<div class="item"><a href="/product/chao-N.html">` +
+        `<style>@media (min-width: 768px) { .productLabelId12 { margin: -11px } }</style>` +
+        `<img alt="Chảo chống dính N"></a>` +
+        `<div><span>449</span><span>,</span><span>000</span><span>&nbsp;</span><span>₫</span></div></div>`
+    );
+
+    expect(first(html, "https://online.mmvietnam.com/search.html?query=chao")).toMatchObject({
+      name: "Chảo chống dính 1",
+      price: 449000,
+    });
+  });
+
+  it("names and prices a Co.op Online card: root product links, a brand link, a saving", () => {
+    const card = (slug: string, brand: string) =>
+      `<div class="product-card">` +
+      `<div><span>Tiết kiệm</span><span>2.000&nbsp;₫</span></div>` +
+      `<a href="/${slug}--s25010106N"><div>Tạm hết hàng</div><img alt="Cháo N"></a>` +
+      `<div><a href="/${brand}-brand.${brand}">${brand}</a></div>` +
+      `<a href="/${slug}--s25010106N"><h3 title="Cháo bí đỏ N">Cháo bí đỏ N</h3>` +
+      `<div class="att-product-detail-latest-price">17.500&nbsp;₫</div><span>/Gói</span>` +
+      `<div class="att-product-detail-retail-price">19.500&nbsp;₫</div><div>-10%</div></a>` +
+      `</div>`;
+    const html = `<html><body><a href="/cart">Giỏ hàng</a>${["1", "2", "3"]
+      .map((n, i) => card("chao-bi-do", i === 0 ? "coop-select" : "bich-chi").replaceAll("N", n))
+      .join("")}</body></html>`;
+
+    expect(
+      readSearchResults(html, "https://cooponline.vn/search?router=productListing&query=chao")[0]
+    ).toMatchObject({
+      name: "Cháo bí đỏ 1",
+      url: "https://cooponline.vn/chao-bi-do--s250101061",
+      price: 17500,
+      regularPrice: 19500,
+      currency: "VND",
+      size: "per Gói",
+    });
+  });
+
   it("never reads a Vietnamese word that starts with đ as a price", () => {
     expect(readPriceInText("Cháo tổ yến 50 đường")).toBeNull();
   });

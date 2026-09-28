@@ -163,9 +163,12 @@ const MONEY_AFTER = new RegExp(`(?<![\\d.,])(${AMOUNT})\\s?(${CURRENCY_MARK}|\\b
  * {@link AMOUNT} insists on cents, and read that way `11.400` is eleven and a
  * bit, so a whole amount grouped by thousands is read only beside a mark that
  * says the currency has nothing smaller. `đ` is also a letter, so it counts as
- * a mark only where no letter follows it.
+ * a mark only where no letter follows it. A shop that sets each group in its
+ * own element (MM Mega Market's `<span>498</span><span>,</span><span>000</span>`)
+ * reads as `498 , 000 ₫` once the card's pieces are spaced apart, so a space
+ * may stand on either side of a separator.
  */
-const WHOLE_AMOUNT = "\\d{1,3}(?:[.,]\\d{3})+|\\d{1,9}";
+const WHOLE_AMOUNT = "\\d{1,3}(?:\\s?[.,]\\s?\\d{3})+|\\d{1,9}";
 const WHOLE_MARK_AFTER = "₫|đồng|đ(?!\\p{L})|VND\\b";
 const WHOLE_BEFORE = new RegExp(`(?:₫|\\bVND)\\s?(${WHOLE_AMOUNT})(?![\\d.,])`, "gu");
 const WHOLE_AFTER = new RegExp(`(?<![\\d.,])(${WHOLE_AMOUNT})\\s?(?:${WHOLE_MARK_AFTER})`, "giu");
@@ -242,7 +245,7 @@ export function readPricesInText(value: string, near?: string | null): PriceInTe
     found.push({ at: match.index, reading: { price, currency, ...(perUnit ? { perUnit } : {}) } });
   }
   for (const match of [...value.matchAll(WHOLE_BEFORE), ...value.matchAll(WHOLE_AFTER)]) {
-    const price = Number((match[1] ?? "").replace(/[.,]/g, ""));
+    const price = Number((match[1] ?? "").replace(/[\s.,]/g, ""));
 
     if (!Number.isFinite(price) || [...claimed].some((at) => Math.abs(at - match.index) < 4)) {
       continue;
@@ -275,7 +278,8 @@ export function readPriceInText(value: string, near?: string | null): PriceInTex
 const NOT_THE_PRICE = new Set(["script", "style", "template"]);
 /** A price struck through by its element, or by the class a shop styles it with. */
 const STRUCK_TAGS = new Set(["del", "s", "strike"]);
-const STRUCK_CLASS = /regular|original|old-?price|strike|was-?price|previous|before-?price/i;
+const STRUCK_CLASS =
+  /regular|original|old-?price|strike|was-?price|previous|before-?price|retail-?price|list-?price/i;
 
 function classOf(node: AnyNode): string {
   return node.type === "tag" ? (node.attribs.class ?? "") : "";
@@ -530,7 +534,7 @@ function pricedLinks(
 
   if (sample.length === 0) return 0;
   const priced = sample.filter(([url, element]) =>
-    statesAPrice($, cardOf($, element, url, pageUrl))
+    statesAPrice($, cardOf($, element, url, pageUrl, group.size))
   ).length;
 
   return Math.round((priced / sample.length) * group.size);
@@ -570,8 +574,10 @@ function productAnchorGroup(
     if (target.pathname === page.pathname) return;
     const segments = target.pathname.split("/").filter((part) => part !== "");
 
-    if (segments.length < 2) return;
-    const signature = `${segments.length}:${segments[0]?.toLowerCase() ?? ""}`;
+    const signature = pathSignature(target);
+
+    // A lone segment is navigation — `/cart`, `/about` — unless it carries an id.
+    if (segments.length < 2 && signature !== ROOT_PRODUCT) return;
     const group = groups.get(signature) ?? new Map<string, CheerioNode>();
 
     if (!group.has(target.href)) group.set(target.href, link);
@@ -591,6 +597,72 @@ function productAnchorGroup(
 }
 
 /**
+ * The shape a one-segment path has when it names a product by its id. Most
+ * shops put products under a section (`/product/…`, `/p/…`); Co.op Online
+ * puts them at the root, `/bi-do-dai-kg--s250603411`, beside `/cart` and
+ * `/chinh-sach-bao-mat`. The id is what tells the two apart.
+ */
+const ROOT_PRODUCT = "1:#";
+
+/** A path's shape: how deep it runs and the section it starts in. */
+function pathSignature(url: URL): string {
+  const segments = url.pathname.split("/").filter((part) => part !== "");
+  const first = segments[0]?.toLowerCase() ?? "";
+
+  if (segments.length === 1 && /\d{4,}/.test(first)) return ROOT_PRODUCT;
+
+  return `${segments.length}:${first}`;
+}
+
+/** How often a link must recur on a page before it reads as a button every card carries. */
+const CARD_ACTION_MIN = 3;
+
+const linkCounts = new WeakMap<cheerio.CheerioAPI, Map<string, number>>();
+
+/** How many anchors on the page lead to each address, counted once per page. */
+function linkCountsOf($: cheerio.CheerioAPI, pageUrl: string): Map<string, number> {
+  const known = linkCounts.get($);
+
+  if (known) return known;
+  const counts = new Map<string, number>();
+
+  $("a[href]").each((_, element) => {
+    const resolved = resolveUrl($(element).attr("href"), pageUrl);
+
+    if (resolved) counts.set(resolved, (counts.get(resolved) ?? 0) + 1);
+  });
+  linkCounts.set($, counts);
+
+  return counts;
+}
+
+/** How many products a shelf holds before its cards' other links are read as their own furniture. */
+const SHELF_MIN = 3;
+
+/**
+ * Whether a link a card holds leads to another product rather than being one
+ * of the card's own buttons. A link to another product has the product's own
+ * shape. On a shelf, where the next product is always close by, a link of any
+ * other shape is the card's own: a wishlist heart that sends a signed-out
+ * shopper to `/sign-in` (MM Mega Market), a brand page (Co.op Online). With
+ * a product or two there is no next product to stop at, so only a link every
+ * card repeats is passed over, and a lone card still stops at the navigation
+ * beside it.
+ */
+function leadsElsewhere(
+  resolved: string,
+  url: string,
+  counts: Map<string, number>,
+  shelf: number
+): boolean {
+  if (withoutQuery(resolved) === withoutQuery(url)) return false;
+  if (pathSignature(new URL(resolved)) === pathSignature(new URL(url))) return true;
+  if (shelf >= SHELF_MIN) return false;
+
+  return (counts.get(resolved) ?? 0) < CARD_ACTION_MIN;
+}
+
+/**
  * The smallest piece of the page that is about this product alone: the anchor
  * grown outwards while everything it links to is still the same product.
  */
@@ -598,9 +670,11 @@ function cardOf(
   $: cheerio.CheerioAPI,
   link: CheerioNode,
   url: string,
-  pageUrl: string
+  pageUrl: string,
+  shelf: number
 ): CheerioNode {
   let card = link;
+  const counts = linkCountsOf($, pageUrl);
 
   for (let step = 0; step < 6; step += 1) {
     const parent = card.parent() as unknown as CheerioNode;
@@ -617,7 +691,7 @@ function cardOf(
         if (!href || NON_PAGE_PROTOCOL.test(href)) return false;
         const resolved = resolveUrl(href, pageUrl);
 
-        return resolved !== null && withoutQuery(resolved) !== withoutQuery(url);
+        return resolved !== null && leadsElsewhere(resolved, url, counts, shelf);
       });
 
     if (elsewhere) break;
@@ -784,6 +858,18 @@ function saleOf(
   if (regular !== null && charged === regular) {
     charged = labelPrices.find((value) => value < regular) ?? price;
   }
+  // A badge that states what the Sale saves ("Tiết kiệm 2.000 ₫" on Co.op
+  // Online) can come before the price and be read as it. The saving and the
+  // price add up to the regular price, which no two unrelated numbers do.
+  if (regular !== null && charged < regular) {
+    const saving = charged;
+    const actual = readPricesInText(spacedText(card))
+      .filter((reading) => !reading.perUnit)
+      .map((reading) => reading.price)
+      .find((value) => value > saving && Math.abs(saving + value - regular) < 0.005);
+
+    if (actual !== undefined) charged = actual;
+  }
   const regularPrice = saleRegularPrice(charged, regular);
   const dealWords = dealWordsOf($, card);
 
@@ -810,6 +896,24 @@ function cardLabels($: cheerio.CheerioAPI, card: CheerioNode): string {
   return labels.filter(Boolean).join(" • ");
 }
 
+/**
+ * An element's words as a reader sees them: without the scripts and styles
+ * inside it. Cheerio's `.text()` keeps both, and MM Mega Market styles a
+ * product's label with a `<style>` inside the product's own link, so the
+ * link's text is a stylesheet before it is a name.
+ */
+function visibleText(node: CheerioNode): string {
+  const words = (element: AnyNode): string[] => {
+    if (element.type === "text") return [element.data];
+    if ("name" in element && NOT_THE_PRICE.has(element.name)) return [];
+    if ("children" in element) return element.children.flatMap(words);
+
+    return [];
+  };
+
+  return collapse(node.toArray().flatMap(words).join(""));
+}
+
 /** What a card calls the product: the link's own words, else the picture beside it. */
 function cardName(
   $: cheerio.CheerioAPI,
@@ -821,10 +925,19 @@ function cardName(
   const fromLabel = label.split(/[,•]/)[0];
   // An anchor wrapped around the whole card says everything the card says,
   // price and size included; its heading says what the product is called.
-  const fromHeading = link.find("h1, h2, h3, h4, h5, h6, [itemprop='name']").first().text();
+  const fromHeading = visibleText(
+    link.find("h1, h2, h3, h4, h5, h6, [itemprop='name']").first() as unknown as CheerioNode
+  );
+  // A card that links its picture and its title separately (Co.op Online)
+  // names the product in the title's heading, not in the picture's link,
+  // which carries a "sold out" badge instead.
+  const fromCardHeading = visibleText(
+    card.find("h1, h2, h3, h4, h5, h6, [itemprop='name']").first() as unknown as CheerioNode
+  );
   const candidates = [
-    collapse(fromHeading),
-    collapse(link.text()),
+    fromHeading,
+    fromCardHeading,
+    visibleText(link),
     collapse(fromImage ?? ""),
     collapse(link.attr("title") ?? ""),
     collapse(fromLabel ?? ""),
@@ -848,7 +961,10 @@ function cardSize(texts: string[], label: string, perUnit: string | undefined): 
     if (looksLikeSize(last)) return last;
   }
 
-  return texts.find((value) => looksLikeSize(value) && !/^\d+$/.test(value)) ?? perUnit;
+  const stated = texts.find((value) => looksLikeSize(value) && !/^\d+$/.test(value));
+
+  // A slash is the shop's shorthand; a shopper reads it as "per".
+  return stated?.replace(/^\/\s*/, "per ") ?? perUnit;
 }
 
 /**
@@ -893,7 +1009,7 @@ function readDomCandidates(
 ): StoreCandidate[] {
   return anchors
     .map(({ url, element }) => {
-      const card = cardOf($, element, url, pageUrl);
+      const card = cardOf($, element, url, pageUrl, anchors.length);
       const label = cardLabels($, card);
       const texts = cardTexts($, card);
       const name = cardName($, card, element, label);
