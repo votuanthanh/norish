@@ -163,3 +163,43 @@ describe("isUnauthorizedTRPCError", () => {
     expect(isUnauthorizedTRPCError(null)).toBe(false);
   });
 });
+
+describe("the HTTP transport", () => {
+  it("sends a shop search on its own request, and batches the queries beside it", async () => {
+    const { createTRPCUntypedClient } = await import("@trpc/client");
+    const requested: string[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        requested.push(new URL(String(input)).pathname);
+
+        return new Response("{}", { status: 500 });
+      })
+    );
+
+    try {
+      const client = createTRPCUntypedClient({
+        links: createTRPCClientLinks({
+          logger,
+          getBaseUrl: () => "http://localhost:3000",
+          includeSubscriptions: false,
+          enableLoggerLink: false,
+        }),
+      });
+
+      await Promise.allSettled([
+        client.query("stores.searchShop", { storeId: "s", term: "chao" }),
+        client.query("stores.listProducts", { storeId: "s" }),
+        client.query("stores.list", undefined),
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(requested.sort()).toEqual([
+      "/api/trpc/stores.listProducts,stores.list",
+      "/api/trpc/stores.searchShop",
+    ]);
+  });
+});
