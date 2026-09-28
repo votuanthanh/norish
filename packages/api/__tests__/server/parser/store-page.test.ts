@@ -625,6 +625,53 @@ describe("what a card says, read the way a shopper reads it", () => {
     });
   });
 
+  it("drops the words a shop writes after every product's name", () => {
+    // Siêu thị GO!: the data adds the end of the barcode, and both add the title.
+    const suffix = "tại Siêu thị GO! - Giá rẻ mỗi ngày";
+    const products = [
+      ["tuong-ot-chinsu-1kg-63925-i.1", "Tương ớt Chinsu 1Kg", "63925", 49700],
+      ["tuong-ot-chinsu-500g-61143-i.2", "Tương ớt Chinsu 500g", "61143", 29300],
+      ["tuong-ot-nam-duong-400g-1-i.3", "Tương ớt cay Nam Dương 400g", "10001", 11600],
+    ] as const;
+    const data = {
+      "@context": "https://schema.org",
+      "@type": "ItemList",
+      itemListElement: products.map(([slug, name, code, price], index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        item: {
+          "@type": "Product",
+          name: `${name} - ${code} ${suffix}`,
+          url: `https://sieuthi-go.vn/product/${slug}`,
+          offers: { "@type": "Offer", priceCurrency: "VND", price },
+        },
+      })),
+    };
+    const cards = products
+      .map(
+        ([slug, name]) =>
+          `<article><a href="https://sieuthi-go.vn/product/${slug}"><h3>${name} ${suffix}</h3></a></article>`
+      )
+      .join("");
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify(data)}</script></head><body>${cards}</body></html>`;
+
+    expect(
+      readSearchResults(html, "https://sieuthi-go.vn/search?keyword=tuong").map(
+        (candidate) => candidate.name
+      )
+    ).toEqual(["Tương ớt Chinsu 1Kg", "Tương ớt Chinsu 500g", "Tương ớt cay Nam Dương 400g"]);
+  });
+
+  it("keeps a size every product on the shelf shares", () => {
+    const html = shelf(
+      `<article><a href="/p/N/cola">Cola N lon 330ml</a><span>€ 0,99</span></article>`
+    );
+
+    expect(readSearchResults(html, "https://shop.example.nl/zoeken?q=cola")[0]?.name).toBe(
+      "Cola 1 lon 330ml"
+    );
+  });
+
   it("never reads a Vietnamese word that starts with đ as a price", () => {
     expect(readPriceInText("Cháo tổ yến 50 đường")).toBeNull();
   });

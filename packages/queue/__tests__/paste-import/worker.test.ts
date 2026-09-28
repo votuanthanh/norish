@@ -47,12 +47,40 @@ vi.mock("@norish/shared-server/realtime/recipes", () => ({
 }));
 
 vi.mock("@norish/shared-server/logger", () => ({
-  createLogger: () => ({ info: vi.fn(), debug: vi.fn(), error: vi.fn() }),
+  createLogger: () => ({ info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
 vi.mock("@norish/shared-server/media/storage", () => ({
   deleteRecipeImagesDir: vi.fn(),
 }));
+
+const extractRecipeWithAI = vi.fn();
+const completeStep = vi.fn(async () => undefined);
+
+vi.mock("@norish/queue/api-handlers", () => ({
+  requireQueueApiHandler: () => extractRecipeWithAI,
+}));
+
+vi.mock("../../src/job-steps", () => ({
+  reportStep: vi.fn(async () => undefined),
+  completeStep,
+}));
+
+function pastedTextJob() {
+  return {
+    id: "job-text",
+    attemptsMade: 0,
+    opts: {},
+    data: {
+      batchId: "batch-text",
+      recipeIds: ["recipe-text"],
+      userId: "user-1",
+      householdKey: "household-1",
+      householdUserIds: null,
+      text: "Đậu phộng rang tỏi ớt. Nguyên liệu: đậu phộng 400g. Bước 1: rang.",
+    },
+  } as any;
+}
 
 describe("processPasteImportJob", () => {
   it("creates valid structured recipes in order and persists normalized ratings", async () => {
@@ -191,6 +219,40 @@ describe("processPasteImportJob", () => {
       expect.objectContaining({ recipeId: "recipe-1", userId: "user-1" }),
       undefined
     );
+  });
+
+  it("records what the AI provider answered when it fails on pasted text", async () => {
+    const { processPasteImportJob } = await import("../../src/paste-import/worker");
+
+    extractRecipeWithAI.mockRejectedValueOnce(new Error("API key not valid"));
+
+    await expect(processPasteImportJob(pastedTextJob())).rejects.toThrow(
+      "Could not parse pasted recipe."
+    );
+    expect(completeStep).toHaveBeenLastCalledWith(expect.anything(), {
+      aiResult: "failed",
+      error: "API key not valid",
+    });
+  });
+
+  it("records which parts were missing when the AI answer is incomplete", async () => {
+    const { processPasteImportJob } = await import("../../src/paste-import/worker");
+
+    extractRecipeWithAI.mockResolvedValueOnce({
+      name: "Đậu phộng rang tỏi ớt",
+      recipeIngredients: [],
+      steps: [],
+    });
+
+    await expect(processPasteImportJob(pastedTextJob())).rejects.toThrow(
+      "Could not parse pasted recipe."
+    );
+    expect(completeStep).toHaveBeenLastCalledWith(expect.anything(), {
+      aiResult: "incomplete",
+      hasName: true,
+      ingredients: 0,
+      steps: 0,
+    });
   });
 
   it("fails when no valid structured items remain", async () => {

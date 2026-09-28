@@ -1080,10 +1080,62 @@ function readDomCandidates(
  * first and is complete; the DOM pass beside it carries the prices, which on
  * a shop like Dirk is five sixths of the shelf (ADR-0028).
  */
+/** The fewest names that must share a tail before it reads as the shop's, not theirs. */
+const SHARED_SUFFIX_MIN_NAMES = 3;
+/** The fewest words such a tail runs to: a shared size ("lon 330ml") is shorter. */
+const SHARED_SUFFIX_MIN_WORDS = 3;
+
+/**
+ * Names without the words every one of them ends with. A shop that writes
+ * its search engine's title into each product's name — "Tương ớt Chinsu 1Kg
+ * tại Siêu thị GO! - Giá rẻ mỗi ngày" — says the same thing after every
+ * product, and what every product on the shelf is called cannot be what
+ * tells one from another.
+ */
+function withoutSharedSuffix(candidates: StoreCandidate[]): StoreCandidate[] {
+  if (candidates.length < SHARED_SUFFIX_MIN_NAMES) return candidates;
+  const split = candidates.map((candidate) => candidate.name.split(" "));
+  let shared = 0;
+
+  while (
+    split.every((words) => shared < words.length - 1) &&
+    split.every(
+      (words) => words[words.length - 1 - shared] === split[0]?.[split[0].length - 1 - shared]
+    )
+  ) {
+    shared += 1;
+  }
+  if (shared < SHARED_SUFFIX_MIN_WORDS) return candidates;
+
+  return candidates.map((candidate, index) => {
+    const words = split[index] ?? [];
+    const kept = words
+      .slice(0, words.length - shared)
+      .join(" ")
+      // The separator the tail started at goes with it: no dash left dangling.
+      .replace(/\s*[-–|:•]\s*$/u, "")
+      .trim();
+
+    return kept ? { ...candidate, name: kept } : candidate;
+  });
+}
+
+/**
+ * The name to keep for a product both the page's data and its card name. The
+ * card's is what the shopper sees; where the data's only adds to it — Siêu
+ * thị GO! adds the end of the barcode, "Tương ớt Chinsu 1Kg - 63925" — the
+ * card's is kept.
+ */
+function shownName(stated: string, shown: string): string {
+  return shown.length >= 2 && stated.length > shown.length && stated.startsWith(shown)
+    ? shown
+    : stated;
+}
+
 export function readSearchResults(html: string, baseUrl: string): StoreCandidate[] {
   if (!html.trim()) return [];
   const $ = cheerio.load(html);
-  const stated = readJsonLdCandidates($, baseUrl);
+  const stated = withoutSharedSuffix(readJsonLdCandidates($, baseUrl));
   const merged = new Map<string, StoreCandidate>();
   // What the page charges in, for a card that states a number and no mark: a
   // mark stated anywhere on the page, else what the shop's address implies.
@@ -1101,7 +1153,9 @@ export function readSearchResults(html: string, baseUrl: string): StoreCandidate
       ? anchorsForUrls($, baseUrl, new Set(stated.map((candidate) => candidate.url)))
       : productAnchorGroup($, baseUrl);
 
-  for (const candidate of readDomCandidates($, baseUrl, anchors, pageCurrency)) {
+  for (const candidate of withoutSharedSuffix(
+    readDomCandidates($, baseUrl, anchors, pageCurrency)
+  )) {
     const existing = merged.get(candidate.url);
 
     if (!existing) {
@@ -1112,6 +1166,7 @@ export function readSearchResults(html: string, baseUrl: string): StoreCandidate
 
     merged.set(candidate.url, {
       ...existing,
+      name: shownName(existing.name, candidate.name),
       price: charged,
       currency: existing.currency ?? candidate.currency,
       ...sized(existing.size ? { size: existing.size, pack: existing.pack ?? null } : null),

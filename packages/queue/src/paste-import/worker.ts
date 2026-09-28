@@ -27,6 +27,7 @@ import { deleteRecipeImagesDir } from "@norish/shared-server/media/storage";
 import { recipes } from "@norish/shared-server/realtime/recipes";
 import { MAX_RECIPE_PASTE_CHARS } from "@norish/shared/contracts/uploads";
 import { FullRecipeInsertSchema } from "@norish/shared/contracts/zod";
+import { ErrorWithDetail } from "@norish/shared/lib/error-extensions";
 import { hasRecipeNameIngredientsAndSteps } from "@norish/shared/lib/helpers";
 
 import { defineLazyWorker, QUEUE_NAMES } from "../config";
@@ -74,17 +75,32 @@ async function parseFromPastedText(
 
   const html = `<html><body><main><h1>Pasted recipe</h1><p>${escapeHtml(trimmed)}</p></main></body></html>`;
 
+  // Why it failed travels with the failure, so the job monitor shows what the
+  // AI provider answered rather than only that the paste could not be read.
+  let detail: unknown;
+
   try {
     const recipe = await extractRecipeWithAI(html, recipeId);
 
     if (hasRecipeNameIngredientsAndSteps(recipe)) {
       return { recipe, usedAI: true };
     }
+    detail = {
+      aiResult: "incomplete",
+      hasName: Boolean(recipe?.name?.trim()),
+      ingredients: recipe?.recipeIngredients?.length ?? 0,
+      steps: recipe?.steps?.length ?? 0,
+    };
   } catch (error) {
     log.warn({ recipeId, err: error }, "AI extraction of pasted text failed");
+    detail = {
+      aiResult: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof ErrorWithDetail ? { cause: error.detail } : {}),
+    };
   }
 
-  throw new Error("Could not parse pasted recipe.");
+  throw new ErrorWithDetail("Could not parse pasted recipe.", detail);
 }
 
 function normalizeImportedRating(rating: number | null): number | null {
@@ -192,7 +208,13 @@ export async function processPasteImportJob(
     }
 
     await reportStep(job, "parsing-text");
-    const parseResult = await parseFromPastedText(text, recipeId, forceAI);
+    const parseResult = await parseFromPastedText(text, recipeId, forceAI).catch(
+      async (error: unknown) => {
+        if (error instanceof ErrorWithDetail) await completeStep(job, error.detail);
+
+        throw error;
+      }
+    );
 
     await reportStep(job, "saving");
     const textResult = await createRecipeWithRefs(
