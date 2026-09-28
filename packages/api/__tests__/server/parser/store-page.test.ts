@@ -608,6 +608,23 @@ describe("what a card says, read the way a shopper reads it", () => {
     });
   });
 
+  it("names a WinMart sale card by its picture, and reads its unstruck regular price", () => {
+    // The picture's link holds only the badge; the old price is struck in CSS.
+    const html = shelf(
+      `<div class="product-card"><a href="/products/rau-ngo-N"><img alt="Rau ngổ N 50g">` +
+        `<div class="sc-4 dLXXdV"> -20%</div></a>` +
+        `<a href="/products/rau-ngo-N"><div aria-label="Rau ngổ N 50g">Rau ngổ N 50g</div></a>` +
+        `<div><div class="isAOXR">4.000&nbsp;₫</div><div class="lnHYdn">5.000&nbsp;₫</div></div></div>`
+    );
+
+    expect(first(html, "https://winmart.vn/search/ng%C3%B2")).toMatchObject({
+      name: "Rau ngổ 1 50g",
+      price: 4000,
+      regularPrice: 5000,
+      currency: "VND",
+    });
+  });
+
   it("never reads a Vietnamese word that starts with đ as a price", () => {
     expect(readPriceInText("Cháo tổ yến 50 đường")).toBeNull();
   });

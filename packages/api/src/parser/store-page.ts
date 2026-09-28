@@ -836,6 +836,34 @@ interface SaleReading {
  * €3.50" — is read the same way. A price read from a label that turns out
  * to be the struck one is not the price charged: the lower one after it is.
  */
+/** A card's percentage badge: "-20%", "- 21 %". */
+const PERCENT_OFF = /(?:^|[\s(])[-−–]\s?(\d{1,2})\s?%/gu;
+
+/**
+ * The regular price a card shows beside the price without striking it
+ * through in markup (WinMart strikes it in its stylesheet, under a hashed
+ * class). The card's percentage badge says which of its other prices it is:
+ * the one that badge takes down to the price. Rounded to within one percent,
+ * as a shop rounds the badge.
+ */
+function discountedFrom($: cheerio.CheerioAPI, card: CheerioNode, price: number): number | null {
+  const text = spacedText(card);
+  const percents = [...text.matchAll(PERCENT_OFF)].map((match) => Number(match[1]));
+
+  if (percents.length === 0) return null;
+  const prices = readPricesInText(text)
+    .filter((reading) => !reading.perUnit)
+    .map((reading) => reading.price);
+
+  return (
+    prices.find(
+      (value) =>
+        value > price &&
+        percents.some((percent) => Math.abs(value * (1 - percent / 100) - price) <= value * 0.01)
+    ) ?? null
+  );
+}
+
 function saleOf(
   $: cheerio.CheerioAPI,
   card: CheerioNode,
@@ -853,6 +881,7 @@ function saleOf(
   if (regular === null && first !== undefined && second !== undefined && first > second) {
     regular = first;
   }
+  if (regular === null) regular = discountedFrom($, card, price);
   let charged = price;
 
   if (regular !== null && charged === regular) {
@@ -943,7 +972,8 @@ function cardName(
     collapse(fromLabel ?? ""),
   ];
 
-  return candidates.find((value) => value.length >= 2) ?? null;
+  // A name has letters: a picture's link may hold nothing but its badge ("-20%").
+  return candidates.find((value) => value.length >= 2 && /\p{L}/u.test(value)) ?? null;
 }
 
 /**
